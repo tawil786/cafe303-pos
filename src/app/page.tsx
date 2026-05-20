@@ -270,12 +270,7 @@ export default function Home() {
 
   const customizeComplete = useMemo(() => {
     if (selection?.type === "custom") {
-      return !!(
-        customization.base &&
-        customization.milk &&
-        customization.sweetener &&
-        customization.temperature
-      );
+      return !!(customization.base && customization.temperature);
     }
     if (selection?.type === "special") {
       return !!(
@@ -325,8 +320,14 @@ export default function Home() {
         drinkType: drinkType as "special" | "custom",
         base:
           selection.type === "custom" ? customization.base : null,
-        milk: customization.milk,
-        sweetener: customization.sweetener,
+        milk:
+          selection.type === "custom"
+            ? customization.milk || null
+            : customization.milk,
+        sweetener:
+          selection.type === "custom"
+            ? customization.sweetener || null
+            : customization.sweetener,
         temperature: customization.temperature,
         notes: notes.trim() || null,
       };
@@ -576,7 +577,13 @@ export default function Home() {
                   options={menuConfig.buildYourOwn.milks}
                   value={customization.milk}
                   onChange={(milk) =>
-                    setCustomization((c) => ({ ...c, milk }))
+                    setCustomization((c) => ({
+                      ...c,
+                      milk:
+                        selection?.type === "custom" && c.milk === milk
+                          ? ""
+                          : milk,
+                    }))
                   }
                 />
               </section>
@@ -589,7 +596,14 @@ export default function Home() {
                   options={menuConfig.buildYourOwn.sweeteners}
                   value={customization.sweetener}
                   onChange={(sweetener) =>
-                    setCustomization((c) => ({ ...c, sweetener }))
+                    setCustomization((c) => ({
+                      ...c,
+                      sweetener:
+                        selection?.type === "custom" &&
+                        c.sweetener === sweetener
+                          ? ""
+                          : sweetener,
+                    }))
                   }
                   variant="forest"
                 />
@@ -665,11 +679,9 @@ export default function Home() {
               </p>
               <p className="mt-3 text-sm text-navy">
                 {[
-                  selection?.type === "custom" && customization.base
-                    ? customization.base
-                    : null,
-                  customization.milk,
-                  customization.sweetener,
+                  selection?.type === "custom" ? customization.base : null,
+                  customization.milk || null,
+                  customization.sweetener || null,
                   customization.temperature,
                 ]
                   .filter(Boolean)
