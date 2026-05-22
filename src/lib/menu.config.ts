@@ -33,7 +33,7 @@ export const menuConfig = {
       temps: ["Hot", "Iced"],
       defaults: {
         base: "Matcha",
-        milk: "Oat Milk",
+        milk: "Whole Milk",
         sweetener: "Bee's Knees",
         temperature: "Hot",
       },

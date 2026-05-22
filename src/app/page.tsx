@@ -1,7 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { menuConfig } from "@/lib/menu.config";
+import {
+  emptyInventory,
+  isAllBasesSoldOut,
+  isSpecialSoldOut,
+  type Inventory,
+} from "@/lib/inventory";
 
 type Step = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -14,6 +20,7 @@ type Customization = {
   base: string | null;
   milk: string;
   sweetener: string;
+  sweeteners: string[];
   temperature: string;
 };
 
@@ -21,6 +28,7 @@ const emptyCustomization: Customization = {
   base: null,
   milk: "",
   sweetener: "",
+  sweeteners: [],
   temperature: "",
 };
 
@@ -164,30 +172,43 @@ function StickyNextBar({
   );
 }
 
+function SoldOutBadge() {
+  return (
+    <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-0.5 text-xs font-medium text-white">
+      Sold out
+    </span>
+  );
+}
+
 function OptionCard({
   label,
   selected,
   onClick,
   variant = "navy",
+  soldOut = false,
 }: {
   label: string;
   selected: boolean;
   onClick: () => void;
   variant?: "navy" | "forest";
+  soldOut?: boolean;
 }) {
   return (
     <button
       type="button"
-      onClick={onClick}
-      className={`relative flex h-[72px] w-[90px] shrink-0 items-center justify-center rounded-[10px] border bg-white px-1 text-[13px] font-medium transition-colors ${
-        selected
-          ? variant === "forest"
-            ? "border-2 border-forest bg-selected-forest text-navy"
-            : "border-2 border-navy-mid bg-selected-navy text-navy"
-          : "border-border-light text-navy hover:bg-gray-50"
+      disabled={soldOut}
+      onClick={soldOut ? undefined : onClick}
+      className={`relative flex h-[72px] w-[90px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-[10px] border bg-white px-1 text-[13px] font-medium transition-colors ${
+        soldOut
+          ? "cursor-not-allowed border-border-light text-muted opacity-40 grayscale"
+          : selected
+            ? variant === "forest"
+              ? "border-2 border-forest bg-selected-forest text-navy"
+              : "border-2 border-navy-mid bg-selected-navy text-navy"
+            : "border-border-light text-navy hover:bg-gray-50"
       }`}
     >
-      {selected && (
+      {selected && !soldOut && (
         <span
           className={`absolute right-1.5 top-1 text-[10px] font-bold ${
             variant === "forest" ? "text-forest" : "text-navy-mid"
@@ -196,7 +217,8 @@ function OptionCard({
           ✓
         </span>
       )}
-      {label}
+      <span>{label}</span>
+      {soldOut && <span className="text-[10px] font-normal text-muted">out</span>}
     </button>
   );
 }
@@ -206,11 +228,13 @@ function OptionGrid({
   value,
   onChange,
   variant = "navy",
+  isSoldOut,
 }: {
   options: string[];
   value: string;
   onChange: (v: string) => void;
   variant?: "navy" | "forest";
+  isSoldOut?: (option: string) => boolean;
 }) {
   return (
     <div className="flex flex-wrap gap-2">
@@ -219,12 +243,61 @@ function OptionGrid({
           key={opt}
           label={opt}
           selected={value === opt}
+          soldOut={isSoldOut?.(opt) ?? false}
           onClick={() => onChange(opt)}
           variant={variant}
         />
       ))}
     </div>
   );
+}
+
+function MultiOptionGrid({
+  options,
+  values,
+  onToggle,
+  max = 2,
+  variant = "navy",
+  isSoldOut,
+}: {
+  options: string[];
+  values: string[];
+  onToggle: (v: string) => void;
+  max?: number;
+  variant?: "navy" | "forest";
+  isSoldOut?: (option: string) => boolean;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((opt) => {
+        const selected = values.includes(opt);
+        const atMax = values.length >= max && !selected;
+        const soldOut = isSoldOut?.(opt) ?? false;
+        return (
+          <OptionCard
+            key={opt}
+            label={opt}
+            selected={selected}
+            soldOut={soldOut}
+            onClick={() => !soldOut && !atMax && onToggle(opt)}
+            variant={variant}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function formatSweeteners(
+  selection: Selection,
+  customization: Customization
+): string | null {
+  if (selection?.type === "custom") {
+    return customization.sweeteners.length > 0
+      ? customization.sweeteners.join(" · ")
+      : null;
+  }
+  return customization.sweetener || null;
 }
 
 function SelectedCheck() {
@@ -243,6 +316,24 @@ export default function Home() {
   const [customerName, setCustomerName] = useState("");
   const [notes, setNotes] = useState("");
   const [placing, setPlacing] = useState(false);
+  const [inventory, setInventory] = useState<Inventory>(emptyInventory);
+
+  const fetchInventory = useCallback(async () => {
+    try {
+      const res = await fetch("/api/inventory");
+      if (!res.ok) return;
+      const data: Inventory = await res.json();
+      setInventory(data);
+    } catch {
+      // ignore fetch errors during polling
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchInventory();
+    const interval = setInterval(fetchInventory, 30000);
+    return () => clearInterval(interval);
+  }, [fetchInventory]);
 
   const selectedSpecial = useMemo(() => {
     if (selection?.type !== "special") return null;
@@ -293,6 +384,7 @@ export default function Home() {
         base: d.base,
         milk: d.milk,
         sweetener: d.sweetener,
+        sweeteners: [],
         temperature: d.temperature,
       });
     } else {
@@ -324,10 +416,7 @@ export default function Home() {
           selection.type === "custom"
             ? customization.milk || null
             : customization.milk,
-        sweetener:
-          selection.type === "custom"
-            ? customization.sweetener || null
-            : customization.sweetener,
+        sweetener: formatSweeteners(selection, customization),
         temperature: customization.temperature,
         notes: notes.trim() || null,
       };
@@ -348,20 +437,48 @@ export default function Home() {
   }
 
   const recapParts = [
-    customization.milk,
-    customization.sweetener,
+    selection?.type === "custom" ? customization.base : null,
+    customization.milk || null,
+    formatSweeteners(selection, customization),
     customization.temperature,
   ];
-  if (selection?.type === "custom" && customization.base) {
-    recapParts.unshift(customization.base);
-  }
   const recapLine = recapParts.filter(Boolean).join(" · ");
 
-  const selectedCardClass = (selected: boolean) =>
+  const allBasesSoldOut = isAllBasesSoldOut(
+    inventory,
+    menuConfig.buildYourOwn.bases
+  );
+
+  const specialUnavailableWarning = useMemo(() => {
+    if (step !== 3 || selection?.type !== "special" || !selectedSpecial) {
+      return false;
+    }
+    if (isSpecialSoldOut(selectedSpecial, inventory).soldOut) return true;
+    if (customization.milk && inventory.milks[customization.milk]) return true;
+    if (customization.sweetener && inventory.sweeteners[customization.sweetener])
+      return true;
+    if (
+      customization.temperature &&
+      inventory.temperatures[customization.temperature]
+    )
+      return true;
+    if (customization.base && inventory.bases[customization.base]) return true;
+    return false;
+  }, [step, selection, selectedSpecial, customization, inventory]);
+
+  useEffect(() => {
+    if (inventory.temperatures["Iced"] && customization.temperature === "Iced") {
+      setCustomization((c) => ({ ...c, temperature: "" }));
+    }
+  }, [inventory.temperatures, customization.temperature]);
+
+  const selectedCardClass = (selected: boolean, soldOut = false) =>
     `relative w-full rounded-xl border p-4 text-left transition-colors ${
-      selected
-        ? "border-2 border-navy-mid bg-selected-navy"
-        : "border border-border-light bg-white hover:bg-gray-50"
+      soldOut
+        ? "cursor-not-allowed border border-border-light bg-white opacity-40 grayscale"
+        : selected
+          ? "border-2 border-navy-mid bg-selected-navy"
+          : "border border-border-light bg-white hover:bg-gray-50"
     }`;
 
   // Step 1 — Welcome
@@ -491,28 +608,37 @@ export default function Home() {
                 const selected =
                   selection?.type === "special" &&
                   selection.id === special.id;
+                const { soldOut, reason } = isSpecialSoldOut(special, inventory);
                 return (
                   <button
                     key={special.id}
                     type="button"
+                    disabled={soldOut}
                     onClick={() =>
+                      !soldOut &&
                       setSelection({ type: "special", id: special.id })
                     }
-                    className={selectedCardClass(selected)}
+                    className={selectedCardClass(selected, soldOut)}
                   >
-                    {selected && <SelectedCheck />}
+                    {soldOut && <SoldOutBadge />}
+                    {selected && !soldOut && <SelectedCheck />}
                     <div className="flex items-start justify-between gap-3">
-                      <div>
+                      <div className={soldOut ? "pr-20" : ""}>
                         <p className="text-lg font-bold text-navy">
                           {drinkEmoji(special.name)} {special.name}
                         </p>
                         <p className="mt-1 text-sm text-muted">
                           {special.description}
                         </p>
+                        {soldOut && reason && reason !== "manual" && (
+                          <p className="mt-1 text-xs text-muted">{reason}</p>
+                        )}
                       </div>
-                      <span className="shrink-0 rounded-md bg-navy/10 px-2 py-0.5 text-xs font-semibold text-navy-mid">
-                        {tempBadge(special.temps)}
-                      </span>
+                      {!soldOut && (
+                        <span className="shrink-0 rounded-md bg-navy/10 px-2 py-0.5 text-xs font-semibold text-navy-mid">
+                          {tempBadge(special.temps)}
+                        </span>
+                      )}
                     </div>
                   </button>
                 );
@@ -526,10 +652,19 @@ export default function Home() {
             </p>
             <button
               type="button"
-              onClick={() => setSelection({ type: "custom" })}
-              className={selectedCardClass(selection?.type === "custom")}
+              disabled={allBasesSoldOut}
+              onClick={() =>
+                !allBasesSoldOut && setSelection({ type: "custom" })
+              }
+              className={selectedCardClass(
+                selection?.type === "custom",
+                allBasesSoldOut
+              )}
             >
-              {selection?.type === "custom" && <SelectedCheck />}
+              {allBasesSoldOut && <SoldOutBadge />}
+              {selection?.type === "custom" && !allBasesSoldOut && (
+                <SelectedCheck />
+              )}
               <p className="text-lg font-bold text-navy">Build Your Own</p>
               <p className="mt-1 text-sm text-muted">
                 You&apos;re the barista. Pick your base, milk & sweetener. 🎨
@@ -541,6 +676,12 @@ export default function Home() {
         {/* Step 3 — Customize */}
         {step === 3 && (
           <>
+            {specialUnavailableWarning && (
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                One of your selections is no longer available. Please update
+                below.
+              </div>
+            )}
             <h2 className="mb-1 text-2xl font-bold text-navy">
               {selection?.type === "custom"
                 ? "Let's build something good. 🎨"
@@ -562,6 +703,7 @@ export default function Home() {
                   <OptionGrid
                     options={menuConfig.buildYourOwn.bases}
                     value={customization.base ?? ""}
+                    isSoldOut={(opt) => !!inventory.bases[opt]}
                     onChange={(base) =>
                       setCustomization((c) => ({ ...c, base }))
                     }
@@ -576,6 +718,7 @@ export default function Home() {
                 <OptionGrid
                   options={menuConfig.buildYourOwn.milks}
                   value={customization.milk}
+                  isSoldOut={(opt) => !!inventory.milks[opt]}
                   onChange={(milk) =>
                     setCustomization((c) => ({
                       ...c,
@@ -591,22 +734,41 @@ export default function Home() {
               <section>
                 <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-navy">
                   Sweetener 🍯
+                  {selection?.type === "custom" && (
+                    <span className="ml-1 normal-case font-normal text-muted">
+                      (up to 2)
+                    </span>
+                  )}
                 </h3>
-                <OptionGrid
-                  options={menuConfig.buildYourOwn.sweeteners}
-                  value={customization.sweetener}
-                  onChange={(sweetener) =>
-                    setCustomization((c) => ({
-                      ...c,
-                      sweetener:
-                        selection?.type === "custom" &&
-                        c.sweetener === sweetener
-                          ? ""
-                          : sweetener,
-                    }))
-                  }
-                  variant="forest"
-                />
+                {selection?.type === "custom" ? (
+                  <MultiOptionGrid
+                    options={menuConfig.buildYourOwn.sweeteners}
+                    values={customization.sweeteners}
+                    max={2}
+                    isSoldOut={(opt) => !!inventory.sweeteners[opt]}
+                    onToggle={(sweetener) =>
+                      setCustomization((c) => ({
+                        ...c,
+                        sweeteners: c.sweeteners.includes(sweetener)
+                          ? c.sweeteners.filter((s) => s !== sweetener)
+                          : c.sweeteners.length < 2
+                            ? [...c.sweeteners, sweetener]
+                            : c.sweeteners,
+                      }))
+                    }
+                    variant="forest"
+                  />
+                ) : (
+                  <OptionGrid
+                    options={menuConfig.buildYourOwn.sweeteners}
+                    value={customization.sweetener}
+                    isSoldOut={(opt) => !!inventory.sweeteners[opt]}
+                    onChange={(sweetener) =>
+                      setCustomization((c) => ({ ...c, sweetener }))
+                    }
+                    variant="forest"
+                  />
+                )}
               </section>
 
               <section>
@@ -616,6 +778,7 @@ export default function Home() {
                 <OptionGrid
                   options={temperatureOptions}
                   value={customization.temperature}
+                  isSoldOut={(opt) => !!inventory.temperatures[opt]}
                   onChange={(temperature) =>
                     setCustomization((c) => ({ ...c, temperature }))
                   }
@@ -681,7 +844,7 @@ export default function Home() {
                 {[
                   selection?.type === "custom" ? customization.base : null,
                   customization.milk || null,
-                  customization.sweetener || null,
+                  formatSweeteners(selection, customization),
                   customization.temperature,
                 ]
                   .filter(Boolean)
@@ -720,7 +883,17 @@ export default function Home() {
 
       {step === 2 && (
         <StickyNextBar
-          disabled={!selection}
+          disabled={
+            !selection ||
+            (selection.type === "special" &&
+              (() => {
+                const s = menuConfig.specials.find(
+                  (sp) => sp.id === selection.id
+                );
+                return s ? isSpecialSoldOut(s, inventory).soldOut : true;
+              })()) ||
+            (selection.type === "custom" && allBasesSoldOut)
+          }
           onClick={goToCustomize}
         />
       )}

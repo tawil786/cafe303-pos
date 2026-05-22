@@ -1,6 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { menuConfig } from "@/lib/menu.config";
+import {
+  emptyInventory,
+  isSpecialSoldOut,
+  type Inventory,
+} from "@/lib/inventory";
 
 type Order = {
   id: string;
@@ -169,6 +175,67 @@ function PendingCard({
   );
 }
 
+function ToggleSwitch({
+  checked,
+  disabled,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onChange}
+      className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+        checked ? "bg-forest" : "bg-navy-mid/40"
+      } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
+    >
+      <span
+        className={`absolute top-0.5 h-5 w-5 rounded-full bg-cream shadow transition-all ${
+          checked ? "left-[22px]" : "left-0.5"
+        }`}
+      />
+    </button>
+  );
+}
+
+function InventoryRow({
+  label,
+  checked,
+  disabled,
+  statusNote,
+  statusClass,
+  onToggle,
+}: {
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  statusNote?: string;
+  statusClass?: string;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 py-2.5">
+      <span className="min-w-0 flex-1 text-sm text-cream">{label}</span>
+      {statusNote && (
+        <span className={`shrink-0 text-xs ${statusClass ?? "text-muted"}`}>
+          {statusNote}
+        </span>
+      )}
+      <ToggleSwitch
+        checked={checked}
+        disabled={disabled}
+        onChange={onToggle}
+      />
+    </div>
+  );
+}
+
 function CompletedCard({ order }: { order: Order }) {
   return (
     <div className="relative rounded-xl border border-border-light bg-white/60 p-3">
@@ -197,6 +264,8 @@ export default function AdminPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [clearConfirming, setClearConfirming] = useState(false);
+  const [inventory, setInventory] = useState<Inventory>(emptyInventory);
+  const [inventoryOpen, setInventoryOpen] = useState(false);
   const seenIdsRef = useRef<Set<string>>(new Set());
   const isFirstFetchRef = useRef(true);
 
@@ -225,13 +294,53 @@ export default function AdminPage() {
     }
   }, []);
 
+  const fetchInventory = useCallback(async () => {
+    try {
+      const res = await fetch("/api/inventory");
+      if (!res.ok) return;
+      const data: Inventory = await res.json();
+      setInventory(data);
+    } catch {
+      // ignore fetch errors
+    }
+  }, []);
+
+  async function saveInventory(updated: Inventory) {
+    const res = await fetch("/api/inventory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updated),
+    });
+    if (res.ok) {
+      const data: Inventory = await res.json();
+      setInventory(data);
+    }
+  }
+
+  function toggleRecord(
+    category: keyof Inventory,
+    key: string
+  ): Inventory {
+    const next = {
+      ...inventory,
+      [category]: { ...inventory[category] },
+    };
+    if (next[category][key]) {
+      delete next[category][key];
+    } else {
+      next[category][key] = true;
+    }
+    return next;
+  }
+
   useEffect(() => {
     if (!authed) return;
 
     fetchOrders();
+    fetchInventory();
     const interval = setInterval(fetchOrders, 4000);
     return () => clearInterval(interval);
-  }, [authed, fetchOrders]);
+  }, [authed, fetchOrders, fetchInventory]);
 
   async function markComplete(id: string) {
     await fetch(`/api/orders/${id}`, {
@@ -269,6 +378,135 @@ export default function AdminPage() {
           {pending.length} pending
         </span>
       </header>
+
+      <section className="border-b border-navy-mid/30 bg-navy">
+        <button
+          type="button"
+          onClick={() => setInventoryOpen((o) => !o)}
+          className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-cream sm:px-6"
+        >
+          Inventory
+          <span className="text-muted">{inventoryOpen ? "▾" : "▸"}</span>
+        </button>
+        {inventoryOpen && (
+          <div className="space-y-4 border-t border-navy-mid/30 px-4 pb-4 sm:px-6">
+            <div>
+              <p className="mb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-cream/70">
+                Specials
+              </p>
+              {menuConfig.specials.map((special) => {
+                const { soldOut, reason } = isSpecialSoldOut(
+                  special,
+                  inventory
+                );
+                const manual = !!inventory.specials[special.id];
+                const autoOnly = soldOut && !manual;
+                return (
+                  <InventoryRow
+                    key={special.id}
+                    label={special.name}
+                    checked={soldOut}
+                    disabled={autoOnly}
+                    statusNote={
+                      manual
+                        ? "Sold out"
+                        : autoOnly && reason
+                          ? reason
+                          : undefined
+                    }
+                    statusClass={
+                      manual ? "text-red-400" : "text-amber-300/90"
+                    }
+                    onToggle={() => {
+                      if (!autoOnly) {
+                        saveInventory(toggleRecord("specials", special.id));
+                      }
+                    }}
+                  />
+                );
+              })}
+            </div>
+
+            <div className="border-t border-navy-mid/30">
+              <p className="mb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-cream/70">
+                Bases
+              </p>
+              {menuConfig.buildYourOwn.bases.map((base) => (
+                <InventoryRow
+                  key={base}
+                  label={base}
+                  checked={!!inventory.bases[base]}
+                  statusNote={
+                    inventory.bases[base] ? "Sold out" : undefined
+                  }
+                  statusClass="text-red-400"
+                  onToggle={() => saveInventory(toggleRecord("bases", base))}
+                />
+              ))}
+            </div>
+
+            <div className="border-t border-navy-mid/30">
+              <p className="mb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-cream/70">
+                Milks
+              </p>
+              {menuConfig.buildYourOwn.milks.map((milk) => (
+                <InventoryRow
+                  key={milk}
+                  label={milk}
+                  checked={!!inventory.milks[milk]}
+                  statusNote={inventory.milks[milk] ? "Sold out" : undefined}
+                  statusClass="text-red-400"
+                  onToggle={() => saveInventory(toggleRecord("milks", milk))}
+                />
+              ))}
+            </div>
+
+            <div className="border-t border-navy-mid/30">
+              <p className="mb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-cream/70">
+                Sweeteners
+              </p>
+              <p className="mb-2 text-xs text-muted">
+                Rooh Afza syrup running out will auto-mark Rooh Afza Latte as
+                sold out.
+              </p>
+              {menuConfig.buildYourOwn.sweeteners.map((sweetener) => (
+                <InventoryRow
+                  key={sweetener}
+                  label={sweetener}
+                  checked={!!inventory.sweeteners[sweetener]}
+                  statusNote={
+                    inventory.sweeteners[sweetener] ? "Sold out" : undefined
+                  }
+                  statusClass="text-red-400"
+                  onToggle={() =>
+                    saveInventory(toggleRecord("sweeteners", sweetener))
+                  }
+                />
+              ))}
+            </div>
+
+            <div className="border-t border-navy-mid/30">
+              <p className="mb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-cream/70">
+                Temperatures
+              </p>
+              <InventoryRow
+                label="Iced drinks"
+                checked={!!inventory.temperatures["Iced"]}
+                statusNote={
+                  inventory.temperatures["Iced"] ? "Sold out" : undefined
+                }
+                statusClass="text-red-400"
+                onToggle={() =>
+                  saveInventory(toggleRecord("temperatures", "Iced"))
+                }
+              />
+              <p className="text-xs text-muted">
+                Turning this off will also affect any iced-only specials.
+              </p>
+            </div>
+          </div>
+        )}
+      </section>
 
       <div className="flex flex-1 flex-col gap-6 p-4 md:flex-row md:gap-8 md:p-6">
         {/* Pending */}
