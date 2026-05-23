@@ -20,3 +20,9 @@ model Order {
   notes        String?
   status       String   @default("pending") // "pending" or "complete"
 }
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
