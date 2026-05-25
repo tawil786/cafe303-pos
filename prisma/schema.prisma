@@ -12,13 +12,13 @@ model Order {
   createdAt    DateTime @default(now())
   customerName String
   drinkName    String
-  drinkType    String // "special" or "custom"
+  drinkType    String
   base         String?
-  milk         String
-  sweetener    String
-  temperature  String
+  milk         String?
+  sweetener    String?
+  temperature  String?
   notes        String?
-  status       String   @default("pending") // "pending" or "complete"
+  status       String   @default("pending")
 }
 
 model Setting {
