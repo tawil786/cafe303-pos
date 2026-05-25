@@ -411,13 +411,10 @@ export default function Home() {
         drinkName,
         drinkType: drinkType as "special" | "custom",
         base:
-          selection.type === "custom" ? customization.base : null,
-        milk:
-          selection.type === "custom"
-            ? customization.milk || null
-            : customization.milk,
-        sweetener: formatSweeteners(selection, customization),
-        temperature: customization.temperature,
+          (selection.type === "custom" ? customization.base : null) || null,
+        milk: customization.milk || null,
+        sweetener: formatSweeteners(selection, customization) || null,
+        temperature: customization.temperature || null,
         notes: notes.trim() || null,
       };
 
