@@ -10,6 +10,18 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const body = await req.json();
-  const order = await prisma.order.create({ data: body });
+  const order = await prisma.order.create({
+    data: {
+      customerName: body.customerName,
+      drinkName: body.drinkName,
+      drinkType: body.drinkType,
+      base: body.base ?? null,
+      milk: body.milk ?? null,
+      sweetener: body.sweetener ?? null,
+      temperature: body.temperature ?? null,
+      notes: body.notes ?? null,
+      status: "pending",
+    },
+  });
   return NextResponse.json(order, { status: 201 });
 }
